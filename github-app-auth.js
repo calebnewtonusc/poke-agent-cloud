@@ -10,6 +10,7 @@ import { readFileSync } from 'fs'
 const APP_ID = process.env.GITHUB_APP_ID || '2752810'
 const INSTALLATION_ID = process.env.GITHUB_APP_INSTALLATION_ID || '106770428'
 const PRIVATE_KEY_PATH = process.env.GITHUB_APP_PRIVATE_KEY_PATH || './claude-agent-app.pem'
+const PRIVATE_KEY_ENV = process.env.GITHUB_APP_PRIVATE_KEY
 
 let cachedToken = null
 let tokenExpiry = null
@@ -26,7 +27,8 @@ export async function getGitHubToken() {
 
   // Generate new token
   try {
-    const privateKey = readFileSync(PRIVATE_KEY_PATH, 'utf8')
+    // Try environment variable first (for Render), then file (for local)
+    const privateKey = PRIVATE_KEY_ENV || readFileSync(PRIVATE_KEY_PATH, 'utf8')
 
     const auth = createAppAuth({
       appId: APP_ID,
