@@ -1,0 +1,13 @@
+{
+  "name": "poke-agent-cloud",
+  "version": "1.0.0",
+  "description": "Cloud-based always-on Claude agent for Poke with full context access",
+  "main": "agent.js",
+  "type": "module",
+  "scripts": {
+    "start": "node agent.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
