@@ -157,13 +157,22 @@ function buildConversationHistory(messages) {
   return conversationMessages
 }
 
-async function callClaude(conversationMessages, fullContext) {
+async function callClaude(conversationMessages, fullContext, completedTasks = []) {
   console.log(`   📊 Context size: ${fullContext.length} chars`)
+
+  // Build completed tasks summary
+  let completedTasksInfo = ''
+  if (completedTasks.length > 0) {
+    completedTasksInfo = '\n\nRECENT TASK COMPLETIONS (from local agent in last 10 minutes):\n'
+    for (const task of completedTasks) {
+      completedTasksInfo += `- ${task.taskId} (${task.status} at ${task.timestamp})\n  Output preview: ${task.output.substring(0, 200)}...\n`
+    }
+  }
 
   const systemPrompt = `You are Claude, Caleb Newton's personal AI assistant, having a conversation via text message through the Poke platform.
 
 IMPORTANT CONTEXT:
-${fullContext}
+${fullContext}${completedTasksInfo}
 
 Guidelines:
 - Keep responses concise and conversational, suitable for SMS/iMessage
@@ -172,22 +181,44 @@ Guidelines:
 - Remember ongoing projects, goals, and preferences
 - Text naturally like a close friend/assistant who knows Caleb well
 
-TASK CREATION CAPABILITY:
-When Caleb asks you to do something that requires local computer access (file operations, running code, git commands, etc.), you can create tasks for local agents to complete.
+YOUR CAPABILITIES - What YOU Can Do (Cloud Agent):
+✅ Things you can do YOURSELF (do these directly, don't delegate):
+  - Answer questions using Caleb's full context
+  - Make web requests and API calls
+  - Search for information online
+  - Read files from GitHub repos (calebnewtonusc/claude-context)
+  - Update context files in GitHub (WHO_IS_CALEB.md, CURRENT_CONTEXT_JAN_2026.md, etc.)
+  - Analyze code, plan projects, give advice
+  - Schedule reminders and track deadlines
+  - Research topics and summarize information
 
-To create a task, include this EXACT format anywhere in your response:
+❌ Things you MUST delegate to Local Agent (create tasks for these):
+  - Read/write files on Caleb's Mac (outside GitHub)
+  - Run commands, scripts, or code on Caleb's Mac
+  - Git operations on local repositories
+  - Open applications
+  - Access calendar or email
+  - Any filesystem operations on the local machine
+
+TASK CREATION - For Local Agent:
+When Caleb asks for something requiring local Mac access, create a task using this format:
+
 [CREATE_TASK priority=high|normal|low]
-Task description goes here. Be specific about what needs to be done.
+bash: actual_command_to_run_here
 [/CREATE_TASK]
 
+For bash commands, prefix with "bash:" so the local agent knows to execute it directly.
+
 Examples:
-- "Can you update my resume?" → Create task to edit resume file
-- "Run the tests" → Create task to execute test suite
-- "Commit these changes" → Create task for git commit
-- "Add this to my todo list" → Create task to update todo file
+- "Run the tests" → [CREATE_TASK priority=high]\nbash: npm test\n[/CREATE_TASK]
+- "Check git status" → [CREATE_TASK priority=normal]\nbash: git status\n[/CREATE_TASK]
+- "List files in my learning modules" → [CREATE_TASK priority=normal]\nbash: ls -la ~/Desktop/2026-Code/learning-modules\n[/CREATE_TASK]
+
+For complex requests, use natural language but be specific about what needs to be done.
 
 You can text Caleb proactively about:
 - Important updates or reminders
+- Completed tasks from the local agent
 - Project milestones
 - Relevant opportunities
 - Thoughtful check-ins based on his goals
@@ -271,6 +302,53 @@ async function logToGitHub(content, sha, replyMessage) {
   }
 
   return await response.json()
+}
+
+// Check for recently completed tasks
+async function checkCompletedTasks() {
+  try {
+    const response = await fetch(
+      `https://api.github.com/repos/${CONTEXT_REPO}/contents/${TASKS_FILE}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${GITHUB_TOKEN}`,
+          'Accept': 'application/vnd.github.v3+json'
+        }
+      }
+    )
+
+    if (!response.ok) {
+      return []
+    }
+
+    const data = await response.json()
+    const content = Buffer.from(data.content, 'base64').toString('utf-8')
+
+    // Parse completed tasks from last 10 minutes
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000)
+    const completedTasks = []
+
+    const taskMatches = content.matchAll(/## (task_\d+)[\s\S]*?\*\*Status:\*\* (completed|failed)[\s\S]*?\*\*Result:\*\* (\w+) at ([\d\-T:.Z]+)[\s\S]*?```\n([\s\S]*?)\n```/g)
+
+    for (const match of taskMatches) {
+      const [, taskId, status, resultStatus, timestamp, output] = match
+      const completedAt = new Date(timestamp)
+
+      if (completedAt > tenMinutesAgo) {
+        completedTasks.push({
+          taskId,
+          status,
+          timestamp,
+          output: output.substring(0, 500) // Limit output size
+        })
+      }
+    }
+
+    return completedTasks
+  } catch (error) {
+    console.error('Error checking completed tasks:', error.message)
+    return []
+  }
 }
 
 async function createTask(taskDescription, priority = 'normal') {
@@ -411,6 +489,13 @@ async function processMessages() {
     // Load full context (cached for performance)
     const fullContext = await loadFullContext()
 
+    // Check for completed tasks from local agent
+    const completedTasks = await checkCompletedTasks()
+    if (completedTasks.length > 0) {
+      console.log(`📋 Found ${completedTasks.length} recently completed tasks`)
+      // Note: We'll include these in responses when relevant, not spam with separate messages
+    }
+
     // Check for proactive updates
     const proactiveMessage = await checkForProactiveUpdates(fullContext)
     if (proactiveMessage) {
@@ -451,7 +536,7 @@ async function processMessages() {
 
     // Call Claude API with full context
     console.log('🤖 Calling Claude API with full context...')
-    const claudeResponse = await callClaude(conversationMessages, fullContext)
+    const claudeResponse = await callClaude(conversationMessages, fullContext, completedTasks)
     console.log(`✓ Claude responded: "${claudeResponse.substring(0, 50)}..."`)
 
     // Parse and create tasks if requested
