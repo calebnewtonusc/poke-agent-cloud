@@ -21,6 +21,7 @@ const POLL_INTERVAL = 5000 // 5 seconds
 const GITHUB_REPO = 'calebnewtonusc/claude-context'
 const MESSAGE_FILE = 'POKE_MESSAGES.md'
 const CONTEXT_REPO = 'calebnewtonusc/claude-context'
+const TASKS_FILE = 'TASKS.md'
 
 let lastProcessedHash = null
 let isProcessing = false
@@ -171,6 +172,20 @@ Guidelines:
 - Remember ongoing projects, goals, and preferences
 - Text naturally like a close friend/assistant who knows Caleb well
 
+TASK CREATION CAPABILITY:
+When Caleb asks you to do something that requires local computer access (file operations, running code, git commands, etc.), you can create tasks for local agents to complete.
+
+To create a task, include this EXACT format anywhere in your response:
+[CREATE_TASK priority=high|normal|low]
+Task description goes here. Be specific about what needs to be done.
+[/CREATE_TASK]
+
+Examples:
+- "Can you update my resume?" → Create task to edit resume file
+- "Run the tests" → Create task to execute test suite
+- "Commit these changes" → Create task for git commit
+- "Add this to my todo list" → Create task to update todo file
+
 You can text Caleb proactively about:
 - Important updates or reminders
 - Project milestones
@@ -256,6 +271,77 @@ async function logToGitHub(content, sha, replyMessage) {
   }
 
   return await response.json()
+}
+
+async function createTask(taskDescription, priority = 'normal') {
+  try {
+    // Fetch current TASKS.md file
+    let currentContent = ''
+    let currentSha = null
+
+    const getResponse = await fetch(
+      `https://api.github.com/repos/${CONTEXT_REPO}/contents/${TASKS_FILE}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${GITHUB_TOKEN}`,
+          'Accept': 'application/vnd.github.v3+json'
+        }
+      }
+    )
+
+    if (getResponse.ok) {
+      const data = await getResponse.json()
+      currentContent = Buffer.from(data.content, 'base64').toString('utf-8')
+      currentSha = data.sha
+    } else if (getResponse.status === 404) {
+      // File doesn't exist, create it
+      currentContent = '# Tasks for Local Agents\n\nTasks created by the cloud agent for local agents to complete.\n\n---\n\n'
+    } else {
+      throw new Error(`Failed to fetch TASKS.md: ${getResponse.status}`)
+    }
+
+    // Create task entry
+    const now = new Date()
+    const taskId = `task_${now.getTime()}`
+    const taskEntry = `## ${taskId}\n\n**Created:** ${now.toISOString()}\n**Priority:** ${priority}\n**Status:** pending\n\n${taskDescription}\n\n---\n\n`
+
+    const updatedContent = currentContent + taskEntry
+
+    // Commit to GitHub
+    const method = currentSha ? 'PUT' : 'PUT'
+    const body = {
+      message: `Add task: ${taskDescription.substring(0, 50)}...`,
+      content: Buffer.from(updatedContent).toString('base64')
+    }
+
+    if (currentSha) {
+      body.sha = currentSha
+    }
+
+    const putResponse = await fetch(
+      `https://api.github.com/repos/${CONTEXT_REPO}/contents/${TASKS_FILE}`,
+      {
+        method,
+        headers: {
+          'Authorization': `Bearer ${GITHUB_TOKEN}`,
+          'Accept': 'application/vnd.github.v3+json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(body)
+      }
+    )
+
+    if (!putResponse.ok) {
+      const error = await putResponse.text()
+      throw new Error(`Failed to create task: ${error}`)
+    }
+
+    console.log(`✓ Created task: ${taskId}`)
+    return taskId
+  } catch (error) {
+    console.error('❌ Error creating task:', error.message)
+    return null
+  }
 }
 
 // Proactive messaging feature
@@ -368,14 +454,35 @@ async function processMessages() {
     const claudeResponse = await callClaude(conversationMessages, fullContext)
     console.log(`✓ Claude responded: "${claudeResponse.substring(0, 50)}..."`)
 
+    // Parse and create tasks if requested
+    const taskRegex = /\[CREATE_TASK priority=(high|normal|low)\]([\s\S]*?)\[\/CREATE_TASK\]/g
+    let match
+    let responseForUser = claudeResponse
+
+    while ((match = taskRegex.exec(claudeResponse)) !== null) {
+      const priority = match[1]
+      const taskDescription = match[2].trim()
+
+      console.log(`📋 Creating ${priority} priority task...`)
+      const taskId = await createTask(taskDescription, priority)
+
+      if (taskId) {
+        // Replace task marker with confirmation message
+        responseForUser = responseForUser.replace(
+          match[0],
+          `[Task created: ${taskId}]`
+        )
+      }
+    }
+
     // Send to Poke
     console.log('📤 Sending to Poke...')
-    await sendToPoke(claudeResponse)
+    await sendToPoke(responseForUser)
     console.log('✓ Sent to Poke')
 
     // Log to GitHub
     console.log('📝 Logging to GitHub...')
-    const result = await logToGitHub(content, sha, claudeResponse)
+    const result = await logToGitHub(content, sha, responseForUser)
     console.log(`✓ Logged to GitHub (${result.commit.sha.substring(0, 7)})`)
 
     // Update last processed hash
