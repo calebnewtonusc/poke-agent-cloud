@@ -7,11 +7,7 @@ services:
     buildCommand: npm install
     startCommand: node agent.js
     envVars:
-      - key: GITHUB_APP_ID
-        sync: false
-      - key: GITHUB_APP_INSTALLATION_ID
-        sync: false
-      - key: GITHUB_APP_PRIVATE_KEY
+      - key: GITHUB_TOKEN
         sync: false
       - key: CLAUDE_API_KEY
         sync: false
