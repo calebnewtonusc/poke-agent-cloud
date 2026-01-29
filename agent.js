@@ -827,8 +827,14 @@ async function processMessages() {
 
     // Send to Poke
     console.log('📤 Sending to Poke...')
-    await sendToPoke(responseForUser)
-    console.log('✓ Sent to Poke')
+    try {
+      await sendToPoke(responseForUser)
+      console.log('✓ Sent to Poke successfully')
+    } catch (error) {
+      console.error('❌ FAILED to send to Poke:', error.message)
+      console.error('   POKE_API_KEY length:', POKE_API_KEY ? POKE_API_KEY.length : 0)
+      // Continue to log to GitHub even if Poke fails
+    }
 
     // Log to GitHub
     console.log('📝 Logging to GitHub...')
