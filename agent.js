@@ -10,6 +10,7 @@ import { readFileSync } from 'fs'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import { createServer } from 'http'
+import { ComposioToolSet } from 'composio-core'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -33,10 +34,15 @@ const MESSAGE_FILE = 'POKE_MESSAGES.md'
 const CONTEXT_REPO = 'calebnewtonusc/claude-context'
 const TASKS_FILE = 'TASKS.md'
 
-// Cache for Todoist tools
+// Cache for tools
 let todoistTools = null
 let todoistToolsLastFetched = null
+let composioTools = null
+let composioToolsLastFetched = null
 const TOOLS_CACHE_DURATION = 60 * 60 * 1000 // 1 hour
+
+// Initialize Composio toolset
+const composioToolset = new ComposioToolSet({ apiKey: COMPOSIO_API_KEY })
 
 let lastProcessedHash = null
 let isProcessing = false
@@ -316,6 +322,90 @@ async function executeTodoistAction(toolName, toolInput) {
   }
 }
 
+// ============================================================================
+// COMPOSIO TOOLS - Google Calendar, Gmail, Drive, etc.
+// ============================================================================
+
+async function getComposioTools() {
+  // Return cached tools if still fresh
+  if (composioTools && composioToolsLastFetched &&
+      Date.now() - composioToolsLastFetched < TOOLS_CACHE_DURATION) {
+    return composioTools
+  }
+
+  try {
+    console.log('   🔧 Loading Composio tools (Google Calendar, Gmail, etc.)...')
+
+    const composioSchema = await composioToolset.getToolsSchema({
+      apps: ['googlecalendar', 'gmail', 'googledrive'],
+      // Get key actions for each app
+      actions: [
+        // Google Calendar
+        'GOOGLECALENDAR_FIND_EVENT',
+        'GOOGLECALENDAR_CREATE_EVENT',
+        'GOOGLECALENDAR_QUICK_ADD_EVENT',
+        // Gmail
+        'GMAIL_SEARCH_EMAILS',
+        'GMAIL_SEND_EMAIL',
+        // Google Drive (if needed later)
+        // 'GOOGLEDRIVE_FIND_FILE',
+        // 'GOOGLEDRIVE_CREATE_FILE'
+      ]
+    })
+
+    // Convert Composio format to Claude format
+    const claudeTools = composioSchema.map(tool => ({
+      name: tool.name.toLowerCase(),
+      description: tool.description || `Execute ${tool.name}`,
+      input_schema: tool.parameters || {
+        type: 'object',
+        properties: {},
+        required: []
+      }
+    }))
+
+    composioTools = claudeTools
+    composioToolsLastFetched = Date.now()
+    console.log(`   ✓ Loaded ${claudeTools.length} Composio tools`)
+
+    return claudeTools
+  } catch (error) {
+    console.error('   ⚠️  Could not load Composio tools:', error.message)
+    return []
+  }
+}
+
+async function executeComposioAction(toolName, toolInput) {
+  try {
+    console.log(`   🔧 Executing Composio ${toolName}...`)
+
+    const entity = await composioToolset.getEntity('default')
+
+    // Execute action with proper format
+    const result = await composioToolset.executeAction({
+      action: toolName.toUpperCase(),
+      params: toolInput,
+      entityId: entity.id
+    })
+
+    console.log(`   ✓ ${toolName} completed`)
+    return result
+  } catch (error) {
+    console.error(`   ❌ Error executing ${toolName}:`, error.message)
+    throw error
+  }
+}
+
+// Combined tool getter - returns both Todoist and Composio tools
+async function getAllTools() {
+  const [todoist, composio] = await Promise.all([
+    getTodoistTools(),
+    getComposioTools()
+  ])
+
+  return [...todoist, ...composio]
+}
+
 async function loadFullContext() {
   const contextFiles = [
     'WHO_IS_CALEB.md',
@@ -486,12 +576,13 @@ YOUR CAPABILITIES - What YOU Can Do (Cloud Agent):
   - Schedule reminders and track deadlines
   - Research topics and summarize information
 
-  🚀 TOOLS YOU HAVE ACCESS TO:
+  🚀 TOOLS YOU HAVE ACCESS TO (use the tool calling interface):
   - Todoist: Create/read/update/complete tasks, manage the todo list
-    Use the tool calling interface - tools execute automatically!
+  - Google Calendar: Find/create events, add to calendar, quick add with natural language
+  - Gmail: Search emails, send emails, check inbox
+  - Google Drive: Find files, access documents (if needed)
 
-  - Google Calendar & Gmail: Available through Poke integrations
-    (Caleb has these synced to Poke already)
+  These tools execute automatically when you call them - just use the tool interface!
 
   📝 EXAMPLES of what you can do:
   - "Read the README from my Personal-Website repo"
@@ -911,12 +1002,12 @@ async function processMessages() {
     const conversationMessages = buildConversationHistory(messages)
     console.log(`Built conversation with ${conversationMessages.length} messages`)
 
-    // Load Todoist tools
-    const todoistTools = await getTodoistTools()
+    // Load all tools (Todoist + Composio)
+    const allTools = await getAllTools()
 
     // Call Claude API with full context and tools
     console.log('🤖 Calling Claude API with full context and tools...')
-    let claudeResponse = await callClaude(conversationMessages, fullContext, completedTasks, todoistTools)
+    let claudeResponse = await callClaude(conversationMessages, fullContext, completedTasks, allTools)
 
     // Handle tool use if Claude wants to use tools
     while (claudeResponse.stopReason === 'tool_use') {
@@ -933,7 +1024,14 @@ async function processMessages() {
       for (const toolUse of toolUseBlocks) {
         console.log(`   Executing: ${toolUse.name}`)
         try {
-          const result = await executeTodoistAction(toolUse.name, toolUse.input)
+          let result
+          // Route to correct executor based on tool name
+          if (toolUse.name.startsWith('todoist_')) {
+            result = await executeTodoistAction(toolUse.name, toolUse.input)
+          } else {
+            result = await executeComposioAction(toolUse.name, toolUse.input)
+          }
+
           toolResults.push({
             type: 'tool_result',
             tool_use_id: toolUse.id,
@@ -963,7 +1061,7 @@ async function processMessages() {
 
       // Continue conversation with tool results
       console.log('   🤖 Continuing conversation with tool results...')
-      claudeResponse = await callClaude(conversationMessages, fullContext, completedTasks, todoistTools)
+      claudeResponse = await callClaude(conversationMessages, fullContext, completedTasks, allTools)
     }
 
     // Extract final text response
