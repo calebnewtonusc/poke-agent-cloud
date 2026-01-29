@@ -11,22 +11,14 @@ import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import { createServer } from 'http'
 import { Composio } from 'composio-core'
+import { getGitHubHeaders } from './github-app-auth.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
 const CLAUDE_API_KEY = process.env.CLAUDE_API_KEY || process.env.ANTHROPIC_API_KEY
 const POKE_API_KEY = process.env.POKE_API_KEY
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN
 const COMPOSIO_API_KEY = process.env.COMPOSIO_API_KEY || 'ak_Weup7L-gmNlw1JJZooP2'
 const POLL_INTERVAL = 2000 // 2 seconds for faster response times
-
-// Simple GitHub headers with personal access token (never expires)
-function getGitHubHeaders() {
-  return {
-    'Authorization': `Bearer ${GITHUB_TOKEN}`,
-    'Accept': 'application/vnd.github.v3+json'
-  }
-}
 
 const GITHUB_REPO = 'calebnewtonusc/claude-context'
 const MESSAGE_FILE = 'POKE_MESSAGES.md'
@@ -47,7 +39,7 @@ let lastProactiveMessage = Date.now()
 
 async function readGitHubFile(repo, filePath, ref = 'main') {
   try {
-    const headers = getGitHubHeaders()
+    const headers = await getGitHubHeaders()
     const response = await fetch(
       `https://api.github.com/repos/${repo}/contents/${filePath}${ref ? `?ref=${ref}` : ''}`,
       { headers }
@@ -88,7 +80,7 @@ async function writeGitHubFile(repo, filePath, content, message, sha = null) {
       {
         method: 'PUT',
         headers: {
-          ...getGitHubHeaders(),
+          ...await getGitHubHeaders(),
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(body)
@@ -117,7 +109,7 @@ async function listGitHubRepos() {
       'https://api.github.com/user/repos?per_page=100&sort=updated',
       {
         headers: {
-          ...getGitHubHeaders()
+          ...await getGitHubHeaders()
         }
       }
     )
@@ -163,7 +155,7 @@ async function loadFullContext() {
         `https://api.github.com/repos/${CONTEXT_REPO}/contents/${file}`,
         {
           headers: {
-            ...getGitHubHeaders()
+            ...await getGitHubHeaders()
           }
         }
       )
@@ -186,7 +178,7 @@ async function fetchMessages() {
     `https://api.github.com/repos/${GITHUB_REPO}/contents/${MESSAGE_FILE}`,
     {
       headers: {
-        ...getGitHubHeaders()
+        ...await getGitHubHeaders()
       }
     }
   )
@@ -469,7 +461,7 @@ async function logToGitHub(content, sha, replyMessage) {
     {
       method: 'PUT',
       headers: {
-        ...getGitHubHeaders(),
+        ...await getGitHubHeaders(),
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
@@ -495,7 +487,7 @@ async function checkCompletedTasks() {
       `https://api.github.com/repos/${CONTEXT_REPO}/contents/${TASKS_FILE}`,
       {
         headers: {
-          ...getGitHubHeaders()
+          ...await getGitHubHeaders()
         }
       }
     )
@@ -544,7 +536,7 @@ async function createTask(taskDescription, priority = 'normal') {
       `https://api.github.com/repos/${CONTEXT_REPO}/contents/${TASKS_FILE}`,
       {
         headers: {
-          ...getGitHubHeaders()
+          ...await getGitHubHeaders()
         }
       }
     )
@@ -583,7 +575,7 @@ async function createTask(taskDescription, priority = 'normal') {
       {
         method,
         headers: {
-          ...getGitHubHeaders(),
+          ...await getGitHubHeaders(),
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(body)
