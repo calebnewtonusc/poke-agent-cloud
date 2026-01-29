@@ -32,6 +32,9 @@ console.log('✓ Composio initialized for tool access')
 let lastProcessedHash = null
 let isProcessing = false
 let lastProactiveMessage = Date.now()
+let lastError = null
+let lastProcessTime = null
+let processCount = 0
 
 // ============================================================================
 // GITHUB FULL ACCESS - Read/Write ANY of Caleb's repos
@@ -657,6 +660,8 @@ async function processMessages() {
   }
 
   isProcessing = true
+  processCount++
+  lastProcessTime = new Date().toISOString()
 
   try {
     // Load full context (cached for performance)
@@ -857,6 +862,12 @@ async function processMessages() {
 
   } catch (error) {
     console.error('❌ Error:', error.message)
+    console.error('   Stack:', error.stack)
+    lastError = {
+      message: error.message,
+      stack: error.stack,
+      time: new Date().toISOString()
+    }
   } finally {
     isProcessing = false
   }
@@ -878,9 +889,30 @@ async function start() {
 
   // Start HTTP server for Render health checks
   const PORT = process.env.PORT || 10000
+
   const server = createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/plain' })
-    res.end('Poke Agent Running\n')
+    if (req.url === '/status') {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        status: 'running',
+        lastProcessedHash: lastProcessedHash?.substring(0, 7),
+        isProcessing,
+        processCount,
+        lastProcessTime,
+        lastError,
+        uptime: process.uptime(),
+        envVars: {
+          GITHUB_APP_ID: !!process.env.GITHUB_APP_ID,
+          GITHUB_APP_INSTALLATION_ID: !!process.env.GITHUB_APP_INSTALLATION_ID,
+          GITHUB_APP_PRIVATE_KEY: process.env.GITHUB_APP_PRIVATE_KEY ? `${process.env.GITHUB_APP_PRIVATE_KEY.length} chars` : 'not set',
+          CLAUDE_API_KEY: !!process.env.CLAUDE_API_KEY,
+          POKE_API_KEY: !!process.env.POKE_API_KEY
+        }
+      }, null, 2))
+    } else {
+      res.writeHead(200, { 'Content-Type': 'text/plain' })
+      res.end('Poke Agent Running\n')
+    }
   })
   server.listen(PORT, () => {
     console.log(`✓ HTTP server listening on port ${PORT}`)
