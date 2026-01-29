@@ -13,5 +13,5 @@ services:
         sync: false
       - key: POKE_API_KEY
         sync: false
-      - key: COMPOSIO_API_KEY
+      - key: TODOIST_API_KEY
         sync: false

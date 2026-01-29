@@ -10,7 +10,6 @@ import { readFileSync } from 'fs'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import { createServer } from 'http'
-import { Composio } from 'composio-core'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -18,6 +17,7 @@ const CLAUDE_API_KEY = process.env.CLAUDE_API_KEY || process.env.ANTHROPIC_API_K
 const POKE_API_KEY = process.env.POKE_API_KEY
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN
 const COMPOSIO_API_KEY = process.env.COMPOSIO_API_KEY || 'ak_Weup7L-gmNlw1JJZooP2'
+const TODOIST_API_KEY = process.env.TODOIST_API_KEY || '2ea5be82d08c1d5274323b1aba8ccf5067456a28'
 const POLL_INTERVAL = 2000 // 2 seconds for faster response times
 
 // Simple GitHub headers with personal access token
@@ -33,9 +33,10 @@ const MESSAGE_FILE = 'POKE_MESSAGES.md'
 const CONTEXT_REPO = 'calebnewtonusc/claude-context'
 const TASKS_FILE = 'TASKS.md'
 
-// Initialize Composio for tool integrations
-const composio = new Composio({ apiKey: COMPOSIO_API_KEY })
-console.log('✓ Composio initialized for tool access')
+// Cache for Todoist tools
+let todoistTools = null
+let todoistToolsLastFetched = null
+const TOOLS_CACHE_DURATION = 60 * 60 * 1000 // 1 hour
 
 let lastProcessedHash = null
 let isProcessing = false
@@ -147,6 +148,174 @@ async function listGitHubRepos() {
 }
 
 // Load full context from GitHub
+// ============================================================================
+// TODOIST API - Direct REST API integration
+// ============================================================================
+
+// Todoist API helpers
+async function todoistRequest(endpoint, method = 'GET', body = null) {
+  const response = await fetch(`https://api.todoist.com/rest/v2/${endpoint}`, {
+    method,
+    headers: {
+      'Authorization': `Bearer ${TODOIST_API_KEY}`,
+      'Content-Type': 'application/json'
+    },
+    body: body ? JSON.stringify(body) : null
+  })
+
+  if (!response.ok) {
+    const error = await response.text()
+    throw new Error(`Todoist API error: ${response.status} - ${error}`)
+  }
+
+  if (response.status === 204) return { success: true }
+  return await response.json()
+}
+
+async function getTodoistTools() {
+  // Return cached tools if still fresh
+  if (todoistTools && todoistToolsLastFetched &&
+      Date.now() - todoistToolsLastFetched < TOOLS_CACHE_DURATION) {
+    return todoistTools
+  }
+
+  // Define Todoist tools in Claude format
+  const tools = [
+    {
+      name: 'todoist_create_task',
+      description: 'Create a new task in Todoist. Use this to add tasks to the user\'s todo list.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          content: {
+            type: 'string',
+            description: 'The task content/title'
+          },
+          description: {
+            type: 'string',
+            description: 'A detailed description of the task'
+          },
+          due_string: {
+            type: 'string',
+            description: 'Human-friendly due date like "tomorrow", "next Monday", "Jan 23"'
+          },
+          priority: {
+            type: 'integer',
+            description: 'Priority from 1 (normal) to 4 (urgent)',
+            enum: [1, 2, 3, 4]
+          },
+          labels: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Labels to add to the task'
+          }
+        },
+        required: ['content']
+      }
+    },
+    {
+      name: 'todoist_get_tasks',
+      description: 'Get active tasks from Todoist. Use this to check the user\'s todo list.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          filter: {
+            type: 'string',
+            description: 'Filter tasks (e.g., "today", "p1" for priority 1, or a project name)'
+          }
+        }
+      }
+    },
+    {
+      name: 'todoist_complete_task',
+      description: 'Mark a task as complete in Todoist.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          id: {
+            type: 'string',
+            description: 'The task ID to complete'
+          }
+        },
+        required: ['id']
+      }
+    },
+    {
+      name: 'todoist_update_task',
+      description: 'Update an existing task in Todoist.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          id: {
+            type: 'string',
+            description: 'The task ID to update'
+          },
+          content: {
+            type: 'string',
+            description: 'New task content/title'
+          },
+          description: {
+            type: 'string',
+            description: 'New task description'
+          },
+          due_string: {
+            type: 'string',
+            description: 'New due date'
+          },
+          priority: {
+            type: 'integer',
+            description: 'New priority (1-4)'
+          }
+        },
+        required: ['id']
+      }
+    }
+  ]
+
+  todoistTools = tools
+  todoistToolsLastFetched = Date.now()
+  console.log(`   ✓ Loaded ${tools.length} Todoist tools`)
+
+  return tools
+}
+
+async function executeTodoistAction(toolName, toolInput) {
+  try {
+    console.log(`   🔧 Executing ${toolName}...`)
+
+    let result
+    switch (toolName) {
+      case 'todoist_create_task':
+        result = await todoistRequest('tasks', 'POST', toolInput)
+        break
+
+      case 'todoist_get_tasks':
+        const filter = toolInput.filter ? `?filter=${encodeURIComponent(toolInput.filter)}` : ''
+        result = await todoistRequest(`tasks${filter}`)
+        break
+
+      case 'todoist_complete_task':
+        await todoistRequest(`tasks/${toolInput.id}/close`, 'POST')
+        result = { success: true, message: `Task ${toolInput.id} completed` }
+        break
+
+      case 'todoist_update_task':
+        const { id, ...updateData } = toolInput
+        result = await todoistRequest(`tasks/${id}`, 'POST', updateData)
+        break
+
+      default:
+        throw new Error(`Unknown tool: ${toolName}`)
+    }
+
+    console.log(`   ✓ ${toolName} completed`)
+    return result
+  } catch (error) {
+    console.error(`   ❌ Error executing ${toolName}:`, error.message)
+    throw error
+  }
+}
+
 async function loadFullContext() {
   const contextFiles = [
     'WHO_IS_CALEB.md',
@@ -274,8 +443,9 @@ function buildConversationHistory(messages) {
   return conversationMessages
 }
 
-async function callClaude(conversationMessages, fullContext, completedTasks = []) {
+async function callClaude(conversationMessages, fullContext, completedTasks = [], tools = []) {
   console.log(`   📊 Context size: ${fullContext.length} chars`)
+  console.log(`   🔧 Available tools: ${tools.length}`)
 
   // Build completed tasks summary
   let completedTasksInfo = ''
@@ -316,14 +486,12 @@ YOUR CAPABILITIES - What YOU Can Do (Cloud Agent):
   - Schedule reminders and track deadlines
   - Research topics and summarize information
 
-  🚀 COMPOSIO TOOLS YOU HAVE (do these yourself via API):
-  - Google Calendar: Create/read/update events, check schedule
-  - Gmail: Read/send/search emails
-  - Notion: Create/read/update pages and databases
-  - Slack: Send messages, read channels
-  - And 100+ more tools available via Composio
+  🚀 TOOLS YOU HAVE ACCESS TO:
+  - Todoist: Create/read/update/complete tasks, manage the todo list
+    Use the tool calling interface - tools execute automatically!
 
-  To use these: Make API calls directly, don't create local tasks!
+  - Google Calendar & Gmail: Available through Poke integrations
+    (Caleb has these synced to Poke already)
 
   📝 EXAMPLES of what you can do:
   - "Read the README from my Personal-Website repo"
@@ -394,6 +562,19 @@ Be resourceful - use ALL your access:
 Current date: ${new Date().toLocaleDateString()}
 Current time: ${new Date().toLocaleTimeString()}`
 
+  // Build request body
+  const requestBody = {
+    model: 'claude-sonnet-4-5-20250929',
+    max_tokens: 2000,
+    messages: conversationMessages,
+    system: systemPrompt
+  }
+
+  // Add tools if available
+  if (tools.length > 0) {
+    requestBody.tools = tools
+  }
+
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -401,12 +582,7 @@ Current time: ${new Date().toLocaleTimeString()}`
       'x-api-key': CLAUDE_API_KEY,
       'anthropic-version': '2023-06-01'
     },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-5-20250929',
-      max_tokens: 2000,
-      messages: conversationMessages,
-      system: systemPrompt
-    })
+    body: JSON.stringify(requestBody)
   })
 
   if (!response.ok) {
@@ -415,7 +591,13 @@ Current time: ${new Date().toLocaleTimeString()}`
   }
 
   const data = await response.json()
-  return data.content[0].text
+
+  // Return both content blocks and stop_reason for tool handling
+  return {
+    content: data.content,
+    stopReason: data.stop_reason,
+    usage: data.usage
+  }
 }
 
 async function sendToPoke(message) {
@@ -729,13 +911,71 @@ async function processMessages() {
     const conversationMessages = buildConversationHistory(messages)
     console.log(`Built conversation with ${conversationMessages.length} messages`)
 
-    // Call Claude API with full context
-    console.log('🤖 Calling Claude API with full context...')
-    const claudeResponse = await callClaude(conversationMessages, fullContext, completedTasks)
-    console.log(`✓ Claude responded: "${claudeResponse.substring(0, 50)}..."`)
+    // Load Todoist tools
+    const todoistTools = await getTodoistTools()
+
+    // Call Claude API with full context and tools
+    console.log('🤖 Calling Claude API with full context and tools...')
+    let claudeResponse = await callClaude(conversationMessages, fullContext, completedTasks, todoistTools)
+
+    // Handle tool use if Claude wants to use tools
+    while (claudeResponse.stopReason === 'tool_use') {
+      console.log('🔧 Claude wants to use tools...')
+
+      // Extract text and tool uses from content
+      const textBlocks = claudeResponse.content.filter(block => block.type === 'text')
+      const toolUseBlocks = claudeResponse.content.filter(block => block.type === 'tool_use')
+
+      console.log(`   Found ${toolUseBlocks.length} tool calls`)
+
+      // Execute all tool calls
+      const toolResults = []
+      for (const toolUse of toolUseBlocks) {
+        console.log(`   Executing: ${toolUse.name}`)
+        try {
+          const result = await executeTodoistAction(toolUse.name, toolUse.input)
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: toolUse.id,
+            content: JSON.stringify(result)
+          })
+        } catch (error) {
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: toolUse.id,
+            content: JSON.stringify({ error: error.message }),
+            is_error: true
+          })
+        }
+      }
+
+      // Add assistant message with tool uses to conversation
+      conversationMessages.push({
+        role: 'assistant',
+        content: claudeResponse.content
+      })
+
+      // Add user message with tool results
+      conversationMessages.push({
+        role: 'user',
+        content: toolResults
+      })
+
+      // Continue conversation with tool results
+      console.log('   🤖 Continuing conversation with tool results...')
+      claudeResponse = await callClaude(conversationMessages, fullContext, completedTasks, todoistTools)
+    }
+
+    // Extract final text response
+    const textContent = claudeResponse.content
+      .filter(block => block.type === 'text')
+      .map(block => block.text)
+      .join('\n')
+
+    console.log(`✓ Claude responded: "${textContent.substring(0, 50)}..."`)
 
     // Initialize response
-    let responseForUser = claudeResponse
+    let responseForUser = textContent
     let operationsCount = 0
 
     // Parse and execute GitHub READ operations
