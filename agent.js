@@ -408,6 +408,15 @@ Current time: ${new Date().toLocaleTimeString()}`
 }
 
 async function sendToPoke(message) {
+  // Truncate long messages to prevent SMS/iMessage length issues
+  const MAX_LENGTH = 1500
+  let truncatedMessage = message
+
+  if (message.length > MAX_LENGTH) {
+    truncatedMessage = message.substring(0, MAX_LENGTH - 50) + '\n\n[Message truncated - too long for SMS]'
+    console.log(`⚠️  Message truncated from ${message.length} to ${truncatedMessage.length} chars`)
+  }
+
   const response = await fetch('https://poke.com/api/v1/inbound-sms/webhook', {
     method: 'POST',
     headers: {
@@ -415,7 +424,7 @@ async function sendToPoke(message) {
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      message,
+      message: truncatedMessage,
       to: '+13104296285'
     })
   })
