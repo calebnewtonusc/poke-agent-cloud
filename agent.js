@@ -10,18 +10,24 @@ import { readFileSync } from 'fs'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import { createServer } from 'http'
+import { Composio } from 'composio-core'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN
 const CLAUDE_API_KEY = process.env.CLAUDE_API_KEY || process.env.ANTHROPIC_API_KEY
 const POKE_API_KEY = process.env.POKE_API_KEY
+const COMPOSIO_API_KEY = process.env.COMPOSIO_API_KEY || 'ak_Weup7L-gmNlw1JJZooP2'
 const POLL_INTERVAL = 5000 // 5 seconds
 
 const GITHUB_REPO = 'calebnewtonusc/claude-context'
 const MESSAGE_FILE = 'POKE_MESSAGES.md'
 const CONTEXT_REPO = 'calebnewtonusc/claude-context'
 const TASKS_FILE = 'TASKS.md'
+
+// Initialize Composio for tool integrations
+const composio = new Composio({ apiKey: COMPOSIO_API_KEY })
+console.log('✓ Composio initialized for tool access')
 
 let lastProcessedHash = null
 let isProcessing = false
@@ -192,13 +198,24 @@ YOUR CAPABILITIES - What YOU Can Do (Cloud Agent):
   - Schedule reminders and track deadlines
   - Research topics and summarize information
 
-❌ Things you MUST delegate to Local Agent (create tasks for these):
+  🚀 COMPOSIO TOOLS YOU HAVE (do these yourself via API):
+  - Google Calendar: Create/read/update events, check schedule
+  - Gmail: Read/send/search emails
+  - Notion: Create/read/update pages and databases
+  - Slack: Send messages, read channels
+  - GitHub: Beyond just your repos - full GitHub API access
+  - And 100+ more tools available via Composio
+
+  To use Composio tools: Make API calls directly, don't create local tasks for these!
+
+❌ Things you MUST delegate to Local Agent (create tasks for these ONLY):
   - Read/write files on Caleb's Mac (outside GitHub)
-  - Run commands, scripts, or code on Caleb's Mac
-  - Git operations on local repositories
-  - Open applications
-  - Access calendar or email
-  - Any filesystem operations on the local machine
+  - Run commands, scripts, or code on Caleb's Mac (npm, python, etc.)
+  - Git operations on local repositories (not GitHub API)
+  - Open Mac applications locally
+  - Local filesystem operations
+
+  Only delegate when it MUST run on Caleb's Mac. Everything else, do yourself!
 
 TASK CREATION - For Local Agent:
 When Caleb asks for something requiring local Mac access, create a task using this format:
