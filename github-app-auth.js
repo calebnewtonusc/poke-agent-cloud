@@ -33,10 +33,16 @@ export async function getGitHubToken() {
       // Use environment variable (for Render)
       privateKey = PRIVATE_KEY_ENV
       console.log('✓ Using private key from environment variable')
+    } else if (PRIVATE_KEY_ENV) {
+      throw new Error(`GITHUB_APP_PRIVATE_KEY is set but too short (${PRIVATE_KEY_ENV.length} chars). Expected RSA key (~1600+ chars)`)
     } else {
-      // Use local file (for development)
-      privateKey = readFileSync(PRIVATE_KEY_PATH, 'utf8')
-      console.log('✓ Using private key from file')
+      // Environment variable not set - try file for local development
+      try {
+        privateKey = readFileSync(PRIVATE_KEY_PATH, 'utf8')
+        console.log('✓ Using private key from file')
+      } catch (fileError) {
+        throw new Error('GITHUB_APP_PRIVATE_KEY environment variable not set and no local file found. Please set GITHUB_APP_PRIVATE_KEY on Render.')
+      }
     }
 
     const auth = createAppAuth({
