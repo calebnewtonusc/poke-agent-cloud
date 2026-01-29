@@ -28,7 +28,16 @@ export async function getGitHubToken() {
   // Generate new token
   try {
     // Try environment variable first (for Render), then file (for local)
-    const privateKey = PRIVATE_KEY_ENV || readFileSync(PRIVATE_KEY_PATH, 'utf8')
+    let privateKey
+    if (PRIVATE_KEY_ENV && PRIVATE_KEY_ENV.length > 100) {
+      // Use environment variable (for Render)
+      privateKey = PRIVATE_KEY_ENV
+      console.log('✓ Using private key from environment variable')
+    } else {
+      // Use local file (for development)
+      privateKey = readFileSync(PRIVATE_KEY_PATH, 'utf8')
+      console.log('✓ Using private key from file')
+    }
 
     const auth = createAppAuth({
       appId: APP_ID,
