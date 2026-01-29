@@ -1,15 +1,21 @@
 services:
-  - type: web
+  - type: background_worker
     name: poke-agent-cloud
     runtime: node
     plan: free
-    autoDeploy: false
+    autoDeploy: true
     buildCommand: npm install
     startCommand: node agent.js
     envVars:
-      - key: GITHUB_TOKEN
+      - key: GITHUB_APP_ID
+        sync: false
+      - key: GITHUB_APP_INSTALLATION_ID
+        sync: false
+      - key: GITHUB_APP_PRIVATE_KEY
         sync: false
       - key: CLAUDE_API_KEY
         sync: false
       - key: POKE_API_KEY
+        sync: false
+      - key: COMPOSIO_API_KEY
         sync: false
