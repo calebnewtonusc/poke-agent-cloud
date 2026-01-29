@@ -1079,7 +1079,7 @@ async function processMessages() {
     // Parse and execute GitHub READ operations
     const githubReadRegex = /\[GITHUB_READ repo=([^\s]+) path=([^\]]+)\]/g
     let githubMatch
-    const githubReadMatches = [...claudeResponse.matchAll(githubReadRegex)]
+    const githubReadMatches = [...textContent.matchAll(githubReadRegex)]
 
     if (githubReadMatches.length > 0) {
       operationsCount += githubReadMatches.length
@@ -1104,7 +1104,7 @@ async function processMessages() {
 
     // Parse and execute GitHub WRITE operations
     const githubWriteRegex = /\[GITHUB_WRITE repo=([^\s]+) path=([^\s]+) message="([^"]+)"\]\n([\s\S]*?)\[\/GITHUB_WRITE\]/g
-    const githubWriteMatches = [...claudeResponse.matchAll(githubWriteRegex)]
+    const githubWriteMatches = [...textContent.matchAll(githubWriteRegex)]
 
     if (githubWriteMatches.length > 0) {
       operationsCount += githubWriteMatches.length
@@ -1131,7 +1131,7 @@ async function processMessages() {
     }
 
     // Parse and execute GitHub LIST REPOS
-    if (claudeResponse.includes('[GITHUB_LIST_REPOS]')) {
+    if (textContent.includes('[GITHUB_LIST_REPOS]')) {
       console.log('📋 Listing GitHub repos...')
       const result = await listGitHubRepos()
       if (result.success) {
@@ -1143,7 +1143,7 @@ async function processMessages() {
     // Parse and create tasks if requested (LOCAL operations only)
     const taskRegex = /\[CREATE_TASK priority=(high|normal|low)\]([\s\S]*?)\[\/CREATE_TASK\]/g
     let match
-    const taskMatches = [...claudeResponse.matchAll(taskRegex)]
+    const taskMatches = [...textContent.matchAll(taskRegex)]
 
     if (taskMatches.length > 0) {
       operationsCount += taskMatches.length
