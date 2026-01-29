@@ -910,9 +910,7 @@ async function start() {
         lastError,
         uptime: process.uptime(),
         envVars: {
-          GITHUB_APP_ID: !!process.env.GITHUB_APP_ID,
-          GITHUB_APP_INSTALLATION_ID: !!process.env.GITHUB_APP_INSTALLATION_ID,
-          GITHUB_APP_PRIVATE_KEY: process.env.GITHUB_APP_PRIVATE_KEY ? `${process.env.GITHUB_APP_PRIVATE_KEY.length} chars` : 'not set',
+          GITHUB_TOKEN: process.env.GITHUB_TOKEN ? `${process.env.GITHUB_TOKEN.length} chars` : 'not set',
           CLAUDE_API_KEY: !!process.env.CLAUDE_API_KEY,
           POKE_API_KEY: !!process.env.POKE_API_KEY
         }
