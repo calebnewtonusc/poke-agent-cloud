@@ -1,5 +1,5 @@
 services:
-  - type: background_worker
+  - type: web
     name: poke-agent-cloud
     runtime: node
     plan: free
