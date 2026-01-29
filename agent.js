@@ -33,6 +33,114 @@ let lastProcessedHash = null
 let isProcessing = false
 let lastProactiveMessage = Date.now()
 
+// ============================================================================
+// GITHUB FULL ACCESS - Read/Write ANY of Caleb's repos
+// ============================================================================
+
+async function readGitHubFile(repo, filePath, ref = 'main') {
+  try {
+    const response = await fetch(
+      `https://api.github.com/repos/${repo}/contents/${filePath}${ref ? `?ref=${ref}` : ''}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${GITHUB_TOKEN}`,
+          'Accept': 'application/vnd.github.v3+json'
+        }
+      }
+    )
+
+    if (!response.ok) {
+      return { success: false, error: `HTTP ${response.status}` }
+    }
+
+    const data = await response.json()
+    const content = Buffer.from(data.content, 'base64').toString('utf-8')
+
+    return {
+      success: true,
+      content,
+      sha: data.sha,
+      path: data.path,
+      size: data.size
+    }
+  } catch (error) {
+    return { success: false, error: error.message }
+  }
+}
+
+async function writeGitHubFile(repo, filePath, content, message, sha = null) {
+  try {
+    const body = {
+      message,
+      content: Buffer.from(content).toString('base64')
+    }
+
+    if (sha) {
+      body.sha = sha
+    }
+
+    const response = await fetch(
+      `https://api.github.com/repos/${repo}/contents/${filePath}`,
+      {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${GITHUB_TOKEN}`,
+          'Accept': 'application/vnd.github.v3+json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(body)
+      }
+    )
+
+    if (!response.ok) {
+      const error = await response.text()
+      return { success: false, error: `HTTP ${response.status}: ${error}` }
+    }
+
+    const data = await response.json()
+    return {
+      success: true,
+      sha: data.content.sha,
+      url: data.content.html_url
+    }
+  } catch (error) {
+    return { success: false, error: error.message }
+  }
+}
+
+async function listGitHubRepos() {
+  try {
+    const response = await fetch(
+      'https://api.github.com/user/repos?per_page=100&sort=updated',
+      {
+        headers: {
+          'Authorization': `Bearer ${GITHUB_TOKEN}`,
+          'Accept': 'application/vnd.github.v3+json'
+        }
+      }
+    )
+
+    if (!response.ok) {
+      return { success: false, error: `HTTP ${response.status}` }
+    }
+
+    const repos = await response.json()
+    return {
+      success: true,
+      repos: repos.map(r => ({
+        name: r.full_name,
+        description: r.description,
+        private: r.private,
+        updated: r.updated_at,
+        language: r.language,
+        url: r.html_url
+      }))
+    }
+  } catch (error) {
+    return { success: false, error: error.message }
+  }
+}
+
 // Load full context from GitHub
 async function loadFullContext() {
   const contextFiles = [
@@ -192,8 +300,15 @@ YOUR CAPABILITIES - What YOU Can Do (Cloud Agent):
   - Answer questions using Caleb's full context
   - Make web requests and API calls
   - Search for information online
-  - Read files from GitHub repos (calebnewtonusc/claude-context)
-  - Update context files in GitHub (WHO_IS_CALEB.md, CURRENT_CONTEXT_JAN_2026.md, etc.)
+
+  📦 FULL GITHUB ACCESS - You can read/write ANY of Caleb's repos:
+  - ALL 24 repos including: Personal-Website, ModelLab, 16TechPersonalities, poke-agent-cloud, etc.
+  - Read any file from any repo
+  - Update/create files in any repo
+  - Search code across all repos
+  - List repos and browse code structure
+  - Examples: "Update my Personal-Website README", "Check ModelLab config", "Search for API usage"
+
   - Analyze code, plan projects, give advice
   - Schedule reminders and track deadlines
   - Research topics and summarize information
@@ -203,10 +318,17 @@ YOUR CAPABILITIES - What YOU Can Do (Cloud Agent):
   - Gmail: Read/send/search emails
   - Notion: Create/read/update pages and databases
   - Slack: Send messages, read channels
-  - GitHub: Beyond just your repos - full GitHub API access
   - And 100+ more tools available via Composio
 
-  To use Composio tools: Make API calls directly, don't create local tasks for these!
+  To use these: Make API calls directly, don't create local tasks!
+
+  📝 EXAMPLES of what you can do:
+  - "Read the README from my Personal-Website repo"
+  - "Update the config in ModelLab"
+  - "Search all my repos for API key usage"
+  - "List all my GitHub repos"
+  - "Check if there are any TODOs in my code"
+  - "Update my context with this information" (write to claude-context repo)
 
 ❌ Things you MUST delegate to Local Agent (create tasks for these ONLY):
   - Read/write files on Caleb's Mac (outside GitHub)
@@ -217,7 +339,24 @@ YOUR CAPABILITIES - What YOU Can Do (Cloud Agent):
 
   Only delegate when it MUST run on Caleb's Mac. Everything else, do yourself!
 
-TASK CREATION - For Local Agent:
+GITHUB OPERATIONS - Do these yourself (cloud agent):
+When Caleb asks you to read/update GitHub files, use this format in your internal thinking:
+
+[GITHUB_READ repo=owner/repo path=file/path.md]
+[GITHUB_WRITE repo=owner/repo path=file/path.md message="commit message"]
+content here
+[/GITHUB_WRITE]
+[GITHUB_LIST_REPOS]
+[GITHUB_SEARCH query="search term"]
+
+The system will execute these automatically and you'll have the results.
+
+Examples:
+- "Read my Personal-Website README" → Use GITHUB_READ with repo=calebnewtonusc/Personal-Website path=README.md
+- "Update my context" → Use GITHUB_WRITE to update files in claude-context repo
+- "Search for API keys" → Use GITHUB_SEARCH query="API_KEY"
+
+TASK CREATION - For Local Agent (ONLY for local Mac operations):
 When Caleb asks for something requiring local Mac access, create a task using this format:
 
 [CREATE_TASK priority=high|normal|low]
@@ -229,9 +368,8 @@ For bash commands, prefix with "bash:" so the local agent knows to execute it di
 Examples:
 - "Run the tests" → [CREATE_TASK priority=high]\nbash: npm test\n[/CREATE_TASK]
 - "Check git status" → [CREATE_TASK priority=normal]\nbash: git status\n[/CREATE_TASK]
-- "List files in my learning modules" → [CREATE_TASK priority=normal]\nbash: ls -la ~/Desktop/2026-Code/learning-modules\n[/CREATE_TASK]
 
-For complex requests, use natural language but be specific about what needs to be done.
+IMPORTANT: Only create tasks for LOCAL operations. GitHub operations you do yourself!
 
 You can text Caleb proactively about:
 - Important updates or reminders
@@ -556,10 +694,54 @@ async function processMessages() {
     const claudeResponse = await callClaude(conversationMessages, fullContext, completedTasks)
     console.log(`✓ Claude responded: "${claudeResponse.substring(0, 50)}..."`)
 
-    // Parse and create tasks if requested
+    // Initialize response
+    let responseForUser = claudeResponse
+
+    // Parse and execute GitHub READ operations
+    const githubReadRegex = /\[GITHUB_READ repo=([^\s]+) path=([^\]]+)\]/g
+    let githubMatch
+    while ((githubMatch = githubReadRegex.exec(claudeResponse)) !== null) {
+      const repo = githubMatch[1]
+      const path = githubMatch[2]
+      console.log(`📖 Reading from GitHub: ${repo}/${path}`)
+      const result = await readGitHubFile(repo, path)
+      if (result.success) {
+        responseForUser = responseForUser.replace(githubMatch[0], `\n[Read ${repo}/${path}]\n`)
+      } else {
+        responseForUser = responseForUser.replace(githubMatch[0], `[Error: ${result.error}]`)
+      }
+    }
+
+    // Parse and execute GitHub WRITE operations
+    const githubWriteRegex = /\[GITHUB_WRITE repo=([^\s]+) path=([^\s]+) message="([^"]+)"\]\n([\s\S]*?)\[\/GITHUB_WRITE\]/g
+    while ((githubMatch = githubWriteRegex.exec(claudeResponse)) !== null) {
+      const repo = githubMatch[1]
+      const path = githubMatch[2]
+      const message = githubMatch[3]
+      const content = githubMatch[4].trim()
+      console.log(`✍️  Writing to GitHub: ${repo}/${path}`)
+      const existing = await readGitHubFile(repo, path)
+      const result = await writeGitHubFile(repo, path, content, message, existing.success ? existing.sha : null)
+      if (result.success) {
+        responseForUser = responseForUser.replace(githubMatch[0], `[✅ Updated ${repo}/${path}]`)
+      } else {
+        responseForUser = responseForUser.replace(githubMatch[0], `[Error: ${result.error}]`)
+      }
+    }
+
+    // Parse and execute GitHub LIST REPOS
+    if (claudeResponse.includes('[GITHUB_LIST_REPOS]')) {
+      console.log('📋 Listing GitHub repos...')
+      const result = await listGitHubRepos()
+      if (result.success) {
+        const repoList = result.repos.slice(0, 10).map(r => `${r.name}`).join(', ')
+        responseForUser = responseForUser.replace('[GITHUB_LIST_REPOS]', `Your repos: ${repoList}`)
+      }
+    }
+
+    // Parse and create tasks if requested (LOCAL operations only)
     const taskRegex = /\[CREATE_TASK priority=(high|normal|low)\]([\s\S]*?)\[\/CREATE_TASK\]/g
     let match
-    let responseForUser = claudeResponse
 
     while ((match = taskRegex.exec(claudeResponse)) !== null) {
       const priority = match[1]
