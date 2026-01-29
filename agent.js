@@ -11,10 +11,10 @@ import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import { createServer } from 'http'
 import { Composio } from 'composio-core'
+import { getGitHubHeaders } from './github-app-auth.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN
 const CLAUDE_API_KEY = process.env.CLAUDE_API_KEY || process.env.ANTHROPIC_API_KEY
 const POKE_API_KEY = process.env.POKE_API_KEY
 const COMPOSIO_API_KEY = process.env.COMPOSIO_API_KEY || 'ak_Weup7L-gmNlw1JJZooP2'
@@ -39,14 +39,10 @@ let lastProactiveMessage = Date.now()
 
 async function readGitHubFile(repo, filePath, ref = 'main') {
   try {
+    const headers = await getGitHubHeaders()
     const response = await fetch(
       `https://api.github.com/repos/${repo}/contents/${filePath}${ref ? `?ref=${ref}` : ''}`,
-      {
-        headers: {
-          'Authorization': `Bearer ${GITHUB_TOKEN}`,
-          'Accept': 'application/vnd.github.v3+json'
-        }
-      }
+      { headers }
     )
 
     if (!response.ok) {
@@ -84,8 +80,7 @@ async function writeGitHubFile(repo, filePath, content, message, sha = null) {
       {
         method: 'PUT',
         headers: {
-          'Authorization': `Bearer ${GITHUB_TOKEN}`,
-          'Accept': 'application/vnd.github.v3+json',
+          ...await getGitHubHeaders(),
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(body)
@@ -114,8 +109,7 @@ async function listGitHubRepos() {
       'https://api.github.com/user/repos?per_page=100&sort=updated',
       {
         headers: {
-          'Authorization': `Bearer ${GITHUB_TOKEN}`,
-          'Accept': 'application/vnd.github.v3+json'
+          ...await getGitHubHeaders()
         }
       }
     )
@@ -161,8 +155,7 @@ async function loadFullContext() {
         `https://api.github.com/repos/${CONTEXT_REPO}/contents/${file}`,
         {
           headers: {
-            'Authorization': `Bearer ${GITHUB_TOKEN}`,
-            'Accept': 'application/vnd.github.v3+json'
+            ...await getGitHubHeaders()
           }
         }
       )
@@ -185,8 +178,7 @@ async function fetchMessages() {
     `https://api.github.com/repos/${GITHUB_REPO}/contents/${MESSAGE_FILE}`,
     {
       headers: {
-        'Authorization': `Bearer ${GITHUB_TOKEN}`,
-        'Accept': 'application/vnd.github.v3+json'
+        ...await getGitHubHeaders()
       }
     }
   )
@@ -460,8 +452,7 @@ async function logToGitHub(content, sha, replyMessage) {
     {
       method: 'PUT',
       headers: {
-        'Authorization': `Bearer ${GITHUB_TOKEN}`,
-        'Accept': 'application/vnd.github.v3+json',
+        ...await getGitHubHeaders(),
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
@@ -487,8 +478,7 @@ async function checkCompletedTasks() {
       `https://api.github.com/repos/${CONTEXT_REPO}/contents/${TASKS_FILE}`,
       {
         headers: {
-          'Authorization': `Bearer ${GITHUB_TOKEN}`,
-          'Accept': 'application/vnd.github.v3+json'
+          ...await getGitHubHeaders()
         }
       }
     )
@@ -537,8 +527,7 @@ async function createTask(taskDescription, priority = 'normal') {
       `https://api.github.com/repos/${CONTEXT_REPO}/contents/${TASKS_FILE}`,
       {
         headers: {
-          'Authorization': `Bearer ${GITHUB_TOKEN}`,
-          'Accept': 'application/vnd.github.v3+json'
+          ...await getGitHubHeaders()
         }
       }
     )
@@ -577,8 +566,7 @@ async function createTask(taskDescription, priority = 'normal') {
       {
         method,
         headers: {
-          'Authorization': `Bearer ${GITHUB_TOKEN}`,
-          'Accept': 'application/vnd.github.v3+json',
+          ...await getGitHubHeaders(),
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(body)
