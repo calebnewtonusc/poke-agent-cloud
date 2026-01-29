@@ -9,6 +9,7 @@
 import { readFileSync } from 'fs'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
+import { createServer } from 'http'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -156,6 +157,8 @@ function buildConversationHistory(messages) {
 }
 
 async function callClaude(conversationMessages, fullContext) {
+  console.log(`   📊 Context size: ${fullContext.length} chars`)
+
   const systemPrompt = `You are Claude, Caleb Newton's personal AI assistant, having a conversation via text message through the Poke platform.
 
 IMPORTANT CONTEXT:
@@ -395,6 +398,21 @@ async function start() {
   console.log(`🧠 Full context access enabled`)
   console.log(`📨 Proactive messaging enabled`)
   console.log('---\n')
+
+  // Test context loading
+  console.log('🔍 Testing context loading...')
+  const testContext = await loadFullContext()
+  console.log(`✓ Loaded ${testContext.length} chars of context\n`)
+
+  // Start HTTP server for Render health checks
+  const PORT = process.env.PORT || 10000
+  const server = createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' })
+    res.end('Poke Agent Running\n')
+  })
+  server.listen(PORT, () => {
+    console.log(`✓ HTTP server listening on port ${PORT}`)
+  })
 
   // Initial process
   try {
