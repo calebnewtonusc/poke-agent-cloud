@@ -435,6 +435,17 @@ async function sendToPoke(message) {
   return await response.json()
 }
 
+// Send progress updates without logging to GitHub
+async function sendProgressUpdate(message) {
+  try {
+    console.log(`📊 Progress update: ${message}`)
+    await sendToPoke(`⏳ ${message}`)
+  } catch (error) {
+    console.error('Failed to send progress update:', error.message)
+    // Don't throw - progress updates are non-critical
+  }
+}
+
 async function logToGitHub(content, sha, replyMessage) {
   const now = new Date()
   const dateStr = now.toISOString().split('T')[0]
@@ -695,6 +706,15 @@ async function processMessages() {
 
     console.log(`📨 New message from ${messageNeedingResponse.from}: "${messageNeedingResponse.content.substring(0, 50)}..."`)
 
+    // Check if this is a complex request that will take time
+    const requestLength = messageNeedingResponse.content.length
+    const hasMultipleRequests = messageNeedingResponse.content.split(/\band\b|,/).length > 3
+    const isComplexRequest = requestLength > 200 || hasMultipleRequests
+
+    if (isComplexRequest) {
+      await sendProgressUpdate('Processing your request... this may take a moment 🧠')
+    }
+
     // Build conversation history
     const conversationMessages = buildConversationHistory(messages)
     console.log(`Built conversation with ${conversationMessages.length} messages`)
@@ -706,14 +726,26 @@ async function processMessages() {
 
     // Initialize response
     let responseForUser = claudeResponse
+    let operationsCount = 0
 
     // Parse and execute GitHub READ operations
     const githubReadRegex = /\[GITHUB_READ repo=([^\s]+) path=([^\]]+)\]/g
     let githubMatch
-    while ((githubMatch = githubReadRegex.exec(claudeResponse)) !== null) {
+    const githubReadMatches = [...claudeResponse.matchAll(githubReadRegex)]
+
+    if (githubReadMatches.length > 0) {
+      operationsCount += githubReadMatches.length
+    }
+
+    for (const githubMatch of githubReadMatches) {
       const repo = githubMatch[1]
       const path = githubMatch[2]
       console.log(`📖 Reading from GitHub: ${repo}/${path}`)
+
+      if (githubReadMatches.length > 2 || isComplexRequest) {
+        await sendProgressUpdate(`Reading ${repo}/${path}... 📖`)
+      }
+
       const result = await readGitHubFile(repo, path)
       if (result.success) {
         responseForUser = responseForUser.replace(githubMatch[0], `\n[Read ${repo}/${path}]\n`)
@@ -724,12 +756,23 @@ async function processMessages() {
 
     // Parse and execute GitHub WRITE operations
     const githubWriteRegex = /\[GITHUB_WRITE repo=([^\s]+) path=([^\s]+) message="([^"]+)"\]\n([\s\S]*?)\[\/GITHUB_WRITE\]/g
-    while ((githubMatch = githubWriteRegex.exec(claudeResponse)) !== null) {
+    const githubWriteMatches = [...claudeResponse.matchAll(githubWriteRegex)]
+
+    if (githubWriteMatches.length > 0) {
+      operationsCount += githubWriteMatches.length
+    }
+
+    for (const githubMatch of githubWriteMatches) {
       const repo = githubMatch[1]
       const path = githubMatch[2]
       const message = githubMatch[3]
       const content = githubMatch[4].trim()
       console.log(`✍️  Writing to GitHub: ${repo}/${path}`)
+
+      if (githubWriteMatches.length > 1 || isComplexRequest) {
+        await sendProgressUpdate(`Updating ${repo}/${path}... ✍️`)
+      }
+
       const existing = await readGitHubFile(repo, path)
       const result = await writeGitHubFile(repo, path, content, message, existing.success ? existing.sha : null)
       if (result.success) {
@@ -752,12 +795,27 @@ async function processMessages() {
     // Parse and create tasks if requested (LOCAL operations only)
     const taskRegex = /\[CREATE_TASK priority=(high|normal|low)\]([\s\S]*?)\[\/CREATE_TASK\]/g
     let match
+    const taskMatches = [...claudeResponse.matchAll(taskRegex)]
 
-    while ((match = taskRegex.exec(claudeResponse)) !== null) {
+    if (taskMatches.length > 0) {
+      operationsCount += taskMatches.length
+      if (taskMatches.length > 3 || isComplexRequest) {
+        await sendProgressUpdate(`Creating ${taskMatches.length} tasks for local agent... 📋`)
+      }
+    }
+
+    for (const match of taskMatches) {
       const priority = match[1]
       const taskDescription = match[2].trim()
 
       console.log(`📋 Creating ${priority} priority task...`)
+
+      // Send update for each task if there are many
+      if (taskMatches.length > 5) {
+        const taskNumber = taskMatches.indexOf(match) + 1
+        await sendProgressUpdate(`Creating task ${taskNumber}/${taskMatches.length}... 💻`)
+      }
+
       const taskId = await createTask(taskDescription, priority)
 
       if (taskId) {
@@ -767,6 +825,16 @@ async function processMessages() {
           `[Task created: ${taskId}]`
         )
       }
+    }
+
+    // If we created many tasks, let user know local agent is working on them
+    if (taskMatches.length > 3) {
+      await sendProgressUpdate(`${taskMatches.length} tasks created. Local agent executing... ⚙️`)
+    }
+
+    // Send completion update if it was a complex request
+    if (operationsCount > 5 || (taskMatches.length > 0 && isComplexRequest)) {
+      await sendProgressUpdate('Compiling results... almost done! ✨')
     }
 
     // Send to Poke
