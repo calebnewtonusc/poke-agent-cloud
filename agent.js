@@ -1,6 +1,6 @@
 /**
  * Cloud-Based Always-On Claude Agent for Poke
- * - Polls GitHub for new messages every 5 seconds
+ * - Polls GitHub for new messages every 2 seconds
  * - Has full access to all your context files
  * - Can proactively send important updates
  * - Runs 24/7 in the cloud
@@ -18,7 +18,7 @@ const GITHUB_TOKEN = process.env.GITHUB_TOKEN
 const CLAUDE_API_KEY = process.env.CLAUDE_API_KEY || process.env.ANTHROPIC_API_KEY
 const POKE_API_KEY = process.env.POKE_API_KEY
 const COMPOSIO_API_KEY = process.env.COMPOSIO_API_KEY || 'ak_Weup7L-gmNlw1JJZooP2'
-const POLL_INTERVAL = 5000 // 5 seconds
+const POLL_INTERVAL = 2000 // 2 seconds for faster response times
 
 const GITHUB_REPO = 'calebnewtonusc/claude-context'
 const MESSAGE_FILE = 'POKE_MESSAGES.md'
